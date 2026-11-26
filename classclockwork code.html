@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClassClockwork | ZeroClash AI Timetable Generator</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel Standalone for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Canvas Confetti CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+
+  <style>
+    @media print {
+      @page { size: landscape; margin: 0.8cm; }
+      body { background: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
+    .print-only { display: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen font-sans antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- 1. CONSTANTS & INITIAL DATASETS ---
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const PERIODS = [
+      { period: 1, label: 'Period 1', timeRange: '09:00 - 10:00' },
+      { period: 2, label: 'Period 2', timeRange: '10:00 - 11:00' },
+      { period: 3, label: 'Period 3', timeRange: '11:15 - 12:15' },
+      { period: 4, label: 'Period 4 (Lunch/Flex)', timeRange: '12:15 - 01:15', isLunch: true },
+      { period: 5, label: 'Period 5', timeRange: '01:45 - 02:45' },
+      { period: 6, label: 'Period 6', timeRange: '02:45 - 03:45' },
+    ];
+
+    // Page 3 Hackathon Demo Scenario
+    const DEMO_PRESET_PAGE_3 = {
+      batches: [
+        { id: 'b_demo1', name: 'CS Section Alpha', studentCount: 40, department: 'Computer Science' },
+        { id: 'b_demo2', name: 'CS Section Beta', studentCount: 38, department: 'Computer Science' },
+      ],
+      faculty: [
+        { id: 'f_sharma', name: 'Dr. Sharma', email: 'sharma@college.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Monday-1'], preferredMorning: true },
+        { id: 'f_turing', name: 'Prof. Turing', email: 'turing@college.edu', department: 'CS', maxHoursPerWeek: 14, unavailableSlots: ['Friday-6'], preferredMorning: false },
+        { id: 'f_hopper', name: 'Dr. Hopper', email: 'hopper@college.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Tuesday-2'], preferredMorning: true },
+        { id: 'f_knuth', name: 'Prof. Knuth', email: 'knuth@college.edu', department: 'CS', maxHoursPerWeek: 10, unavailableSlots: ['Thursday-1'], preferredMorning: true },
+        { id: 'f_liskov', name: 'Dr. Liskov', email: 'liskov@college.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Wednesday-5'], preferredMorning: false },
+      ],
+      rooms: [
+        { id: 'r_101', name: 'Room 101', capacity: 50, isLab: false, equipment: ['Projector', 'Whiteboard'] },
+        { id: 'r_102', name: 'Room 102', capacity: 45, isLab: false, equipment: ['Projector', 'Smart Audio'] },
+        { id: 'r_103', name: 'Room 103', capacity: 45, isLab: false, equipment: ['Whiteboard'] },
+        { id: 'lab_os', name: 'OS Systems Lab 1', capacity: 45, isLab: true, equipment: ['Linux Workstations', 'LAN'] },
+      ],
+      subjects: [
+        { id: 's_os_lab', code: 'CS202L', name: 'Operating Systems Lab (3hr)', credits: 3, batchId: 'b_demo1', facultyId: 'f_sharma', isLab: true, sessionDuration: 3, weeklySessions: 1 },
+        { id: 's_dsa', code: 'CS201', name: 'Data Structures', credits: 4, batchId: 'b_demo1', facultyId: 'f_sharma', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's_arch', code: 'CS203', name: 'Computer Architecture', credits: 3, batchId: 'b_demo1', facultyId: 'f_turing', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's_dbms', code: 'CS204', name: 'Database Systems', credits: 4, batchId: 'b_demo2', facultyId: 'f_hopper', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's_algo', code: 'CS301', name: 'Design of Algorithms', credits: 4, batchId: 'b_demo2', facultyId: 'f_knuth', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's_se', code: 'CS302', name: 'Software Engineering', credits: 3, batchId: 'b_demo2', facultyId: 'f_liskov', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+      ]
+    };
+
+    // Full CS Semester Scenario (Step 10)
+    const FULL_PRESET = {
+      batches: [
+        { id: 'b1', name: 'CS-Year 2 (Sec A)', studentCount: 45, department: 'Computer Science' },
+        { id: 'b2', name: 'CS-Year 2 (Sec B)', studentCount: 40, department: 'Computer Science' },
+        { id: 'b3', name: 'CS-Year 3 (Sec A)', studentCount: 50, department: 'Computer Science' },
+      ],
+      faculty: [
+        { id: 'f1', name: 'Dr. Sharma', email: 'sharma@univ.edu', department: 'CS', maxHoursPerWeek: 14, unavailableSlots: ['Monday-1'], preferredMorning: true },
+        { id: 'f2', name: 'Prof. Alan Turing', email: 'turing@univ.edu', department: 'CS', maxHoursPerWeek: 16, unavailableSlots: ['Friday-6'], preferredMorning: false },
+        { id: 'f3', name: 'Dr. Grace Hopper', email: 'hopper@univ.edu', department: 'CS', maxHoursPerWeek: 15, unavailableSlots: ['Tuesday-1'], preferredMorning: true },
+        { id: 'f4', name: 'Prof. Donald Knuth', email: 'knuth@univ.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Thursday-1'], preferredMorning: true },
+        { id: 'f5', name: 'Dr. Barbara Liskov', email: 'liskov@univ.edu', department: 'CS', maxHoursPerWeek: 14, unavailableSlots: ['Monday-6'], preferredMorning: false },
+        { id: 'f6', name: 'Prof. Leslie Lamport', email: 'lamport@univ.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Wednesday-1'], preferredMorning: false },
+        { id: 'f7', name: 'Dr. John McCarthy', email: 'mccarthy@univ.edu', department: 'CS', maxHoursPerWeek: 14, unavailableSlots: ['Friday-1'], preferredMorning: true },
+        { id: 'f8', name: 'Prof. Ken Thompson', email: 'ken@univ.edu', department: 'CS', maxHoursPerWeek: 14, unavailableSlots: ['Tuesday-6'], preferredMorning: false },
+        { id: 'f9', name: 'Dr. Dennis Ritchie', email: 'ritchie@univ.edu', department: 'CS', maxHoursPerWeek: 15, unavailableSlots: ['Thursday-6'], preferredMorning: true },
+        { id: 'f10', name: 'Prof. Ada Lovelace', email: 'lovelace@univ.edu', department: 'CS', maxHoursPerWeek: 12, unavailableSlots: ['Wednesday-6'], preferredMorning: true },
+      ],
+      rooms: [
+        { id: 'r101', name: 'Room 101 (Lecture Hall A)', capacity: 60, isLab: false, equipment: ['Projector', 'Smart Audio'] },
+        { id: 'r102', name: 'Room 102 (Lecture Hall B)', capacity: 55, isLab: false, equipment: ['Projector'] },
+        { id: 'r201', name: 'Room 201 (Seminar Room)', capacity: 45, isLab: false, equipment: ['Whiteboard'] },
+        { id: 'r202', name: 'Room 202 (Lecture Hall C)', capacity: 50, isLab: false, equipment: ['Projector'] },
+        { id: 'lab1', name: 'Lab 101 (OS & Systems Lab)', capacity: 50, isLab: true, equipment: ['Workstations', 'LAN'] },
+        { id: 'lab2', name: 'Lab 201 (Algorithms & AI Lab)', capacity: 45, isLab: true, equipment: ['GPU Rigs'] },
+      ],
+      subjects: [
+        { id: 's1', code: 'CS201', name: 'Data Structures & Algorithms', credits: 4, batchId: 'b1', facultyId: 'f1', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's2', code: 'CS202', name: 'Operating Systems Theory', credits: 3, batchId: 'b1', facultyId: 'f2', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's3', code: 'CS202L', name: 'Operating Systems Lab', credits: 2, batchId: 'b1', facultyId: 'f1', isLab: true, sessionDuration: 2, weeklySessions: 1 },
+        { id: 's4', code: 'CS204', name: 'Database Management Systems', credits: 4, batchId: 'b2', facultyId: 'f3', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's5', code: 'CS204L', name: 'DBMS Practicum Lab', credits: 2, batchId: 'b2', facultyId: 'f3', isLab: true, sessionDuration: 2, weeklySessions: 1 },
+        { id: 's6', code: 'CS301', name: 'Computer Networks', credits: 3, batchId: 'b2', facultyId: 'f4', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's7', code: 'CS302', name: 'Software Engineering & Arch', credits: 3, batchId: 'b3', facultyId: 'f5', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+        { id: 's8', code: 'CS303', name: 'Distributed Systems & Cloud', credits: 4, batchId: 'b3', facultyId: 'f6', isLab: false, sessionDuration: 1, weeklySessions: 3 },
+      ]
+    };
+
+    // --- 2. CSP SOLVER (Backtracking + MRV Heuristic) ---
+    function solveTimetableCSP(subjects, facultyList, rooms, batches) {
+      const startTime = performance.now();
+      const facultyMap = new Map(facultyList.map(f => [f.id, f]));
+      const batchMap = new Map(batches.map(b => [b.id, b]));
+
+      // 1. Unroll variables
+      const variables = [];
+      for (const subj of subjects) {
+        const fac = facultyMap.get(subj.facultyId);
+        const bat = batchMap.get(subj.batchId);
+        if (!fac || !bat) continue;
+        for (let i = 0; i < (subj.weeklySessions || 1); i++) {
+          variables.push({
+            id: `${subj.id}_s${i}`,
+            subject: subj,
+            faculty: fac,
+            batch: bat,
+            sessionIndex: i,
+            duration: subj.sessionDuration || 1,
+            isLab: subj.isLab
+          });
+        }
+      }
+
+      const getCandidateRooms = (v) => rooms.filter(r => r.capacity >= v.batch.studentCount && (!v.isLab || r.isLab));
+
+      const isSlotValid = (v, day, startP, room, occFac, occRoom, occBatch) => {
+        if (startP + v.duration - 1 > 6) return false;
+        for (let offset = 0; offset < v.duration; offset++) {
+          const p = startP + offset;
+          if (v.faculty.unavailableSlots.includes(`${day}-${p}`)) return false;
+          if (occFac.has(`${v.faculty.id}_${day}_${p}`)) return false;
+          if (occRoom.has(`${room.id}_${day}_${p}`)) return false;
+          if (occBatch.has(`${v.batch.id}_${day}_${p}`)) return false;
+        }
+        return true;
+      };
+
+      const getDomainValues = (v, occFac, occRoom, occBatch, batchSubjDays) => {
+        const candRooms = getCandidateRooms(v);
+        const domain = [];
+        for (const day of DAYS) {
+          const alreadyHasToday = batchSubjDays.has(`${v.batch.id}_${v.subject.id}_${day}`);
+          for (let startP = 1; startP <= 6 - v.duration + 1; startP++) {
+            for (const room of candRooms) {
+              if (isSlotValid(v, day, startP, room, occFac, occRoom, occBatch)) {
+                let score = 0;
+                if (v.isLab) {
+                  if (startP >= 4) score += 30; // Dedicated afternoon lab blocks
+                  if (room.isLab) score += 20;
+                } else {
+                  if (v.faculty.preferredMorning && startP <= 3) score += 15;
+                  if (!v.faculty.preferredMorning && startP >= 4) score += 10;
+                  if (!room.isLab) score += 15;
+                  if (startP === 4) score -= 25; // Protect period 4 lunch break
+                  if (alreadyHasToday) score -= 40; // Spread lectures across days
+                }
+                domain.push({ day, startP, room, score });
+              }
+            }
+          }
+        }
+        return domain.sort((a, b) => b.score - a.score);
+      };
+
+      const occFac = new Set();
+      const occRoom = new Set();
+      const occBatch = new Set();
+      const batchSubjDays = new Set();
+      const assignments = new Map();
+      let iterations = 0;
+      let backtracks = 0;
+      const unassigned = [...variables];
+
+      function backtrack() {
+        iterations++;
+        if (iterations > 3500 || (performance.now() - startTime) > 1400) return false;
+        if (unassigned.length === 0) return true;
+
+        // MRV Heuristic
+        let bestIdx = -1;
+        let minDomain = Infinity;
+        let bestDomain = [];
+
+        for (let i = 0; i < unassigned.length; i++) {
+          const v = unassigned[i];
+          const dom = getDomainValues(v, occFac, occRoom, occBatch, batchSubjDays);
+          if (dom.length === 0) return false; // Dead end branch
+          if (dom.length < minDomain || (dom.length === minDomain && v.duration > (bestIdx >= 0 ? unassigned[bestIdx].duration : 0))) {
+            minDomain = dom.length;
+            bestIdx = i;
+            bestDomain = dom;
+          }
+        }
+
+        if (bestIdx === -1) return false;
+        const [selectedVar] = unassigned.splice(bestIdx, 1);
+
+        for (const val of bestDomain) {
+          if (!isSlotValid(selectedVar, val.day, val.startP, val.room, occFac, occRoom, occBatch)) continue;
+
+          assignments.set(selectedVar.id, { day: val.day, period: val.startP, roomId: val.room.id });
+          for (let o = 0; o < selectedVar.duration; o++) {
+            const p = val.startP + o;
+            occFac.add(`${selectedVar.faculty.id}_${val.day}_${p}`);
+            occRoom.add(`${val.room.id}_${val.day}_${p}`);
+            occBatch.add(`${selectedVar.batch.id}_${val.day}_${p}`);
+          }
+          batchSubjDays.add(`${selectedVar.batch.id}_${selectedVar.subject.id}_${val.day}`);
+
+          if (backtrack()) return true;
+
+          backtracks++;
+          assignments.delete(selectedVar.id);
+          for (let o = 0; o < selectedVar.duration; o++) {
+            const p = val.startP + o;
+            occFac.delete(`${selectedVar.faculty.id}_${val.day}_${p}`);
+            occRoom.delete(`${val.room.id}_${val.day}_${p}`);
+            occBatch.delete(`${selectedVar.batch.id}_${val.day}_${p}`);
+          }
+          batchSubjDays.delete(`${selectedVar.batch.id}_${selectedVar.subject.id}_${val.day}`);
+        }
+
+        unassigned.splice(bestIdx, 0, selectedVar);
+        return false;
+      }
+
+      const success = backtrack();
+      const allocations = [];
+      const unallocated = [];
+
+      for (const v of variables) {
+        const a = assignments.get(v.id);
+        if (a) {
+          allocations.push({
+            id: `alloc_${v.id}`,
+            subjectId: v.subject.id,
+            batchId: v.batch.id,
+            facultyId: v.faculty.id,
+            roomId: a.roomId,
+            day: a.day,
+            period: a.period,
+            duration: v.duration,
+          });
+        } else {
+          unallocated.push({ subject: v.subject, sessionIndex: v.sessionIndex });
+        }
+      }
+
+      return {
+        success: success && unallocated.length === 0,
+        allocations,
+        unallocated,
+        executionTimeMs: Math.round(performance.now() - startTime),
+        iterations,
+        backtracks
+      };
+    }
+
+    // --- 3. REAL-TIME CLASH DETECTOR ---
+    function detectClashes(allocations, subjects, facultyList, rooms, batches) {
+      const violations = [];
+      const subjectMap = new Map(subjects.map(s => [s.id, s]));
+      const facultyMap = new Map(facultyList.map(f => [f.id, f]));
+      const roomMap = new Map(rooms.map(r => [r.id, r]));
+      const batchMap = new Map(batches.map(b => [b.id, b]));
+
+      const slotOcc = [];
+      for (const a of allocations) {
+        const dur = a.duration || 1;
+        for (let o = 0; o < dur; o++) {
+          const p = a.period + o;
+          if (p <= 6) {
+            slotOcc.push({ ...a, activePeriod: p });
+          }
+        }
+      }
+
+      const slotMap = new Map();
+      for (const item of slotOcc) {
+        const key = `${item.day}-${item.activePeriod}`;
+        if (!slotMap.has(key)) slotMap.set(key, []);
+        slotMap.get(key).push(item);
+      }
+
+      slotMap.forEach((items, key) => {
+        // Faculty double-booking
+        const facSeen = new Map();
+        for (const item of items) {
+          if (!facSeen.has(item.facultyId)) facSeen.set(item.facultyId, []);
+          facSeen.get(item.facultyId).push(item);
+        }
+        facSeen.forEach((list, fId) => {
+          if (list.length > 1) {
+            const fac = facultyMap.get(fId);
+            const facName = fac?.name || 'Faculty';
+            const roomNames = list.map(i => roomMap.get(i.roomId)?.name || 'Room').join(' and ');
+            violations.push({
+              id: `fac-${key}-${fId}`,
+              type: 'FACULTY_DOUBLE_BOOKED',
+              title: `Faculty Double-Booked: ${facName}`,
+              message: `Clash: ${facName} already booked in ${roomNames} during ${list[0].day} Period ${list[0].activePeriod}.`,
+              allocationIds: list.map(i => i.id),
+              day: list[0].day,
+              period: list[0].activePeriod,
+            });
+          }
+        });
+
+        // Room double-booking
+        const roomSeen = new Map();
+        for (const item of items) {
+          if (!roomSeen.has(item.roomId)) roomSeen.set(item.roomId, []);
+          roomSeen.get(item.roomId).push(item);
+        }
+        roomSeen.forEach((list, rId) => {
+          if (list.length > 1) {
+            const room = roomMap.get(rId);
+            const roomName = room?.name || 'Room';
+            const subjs = list.map(i => subjectMap.get(i.subjectId)?.code || 'Course').join(' & ');
+            violations.push({
+              id: `room-${key}-${rId}`,
+              type: 'ROOM_DOUBLE_BOOKED',
+              title: `Room Double-Booked: ${roomName}`,
+              message: `Clash: ${roomName} is double-booked by ${subjs} at ${list[0].day} Period ${list[0].activePeriod}.`,
+              allocationIds: list.map(i => i.id),
+              day: list[0].day,
+              period: list[0].activePeriod,
+            });
+          }
+        });
+
+        // Batch overlap
+        const batchSeen = new Map();
+        for (const item of items) {
+          if (!batchSeen.has(item.batchId)) batchSeen.set(item.batchId, []);
+          batchSeen.get(item.batchId).push(item);
+        }
+        batchSeen.forEach((list, bId) => {
+          if (list.length > 1) {
+            const batch = batchMap.get(bId);
+            const bName = batch?.name || 'Batch';
+            const subjs = list.map(i => subjectMap.get(i.subjectId)?.code || 'Course').join(' & ');
+            violations.push({
+              id: `batch-${key}-${bId}`,
+              type: 'BATCH_DOUBLE_BOOKED',
+              title: `Batch Overlap: ${bName}`,
+              message: `Overlap: Batch ${bName} has concurrent classes (${subjs}) at ${list[0].day} Period ${list[0].activePeriod}.`,
+              allocationIds: list.map(i => i.id),
+              day: list[0].day,
+              period: list[0].activePeriod,
+            });
+          }
+        });
+      });
+
+      // Capacity & Faculty Availability checks
+      for (const a of allocations) {
+        const room = roomMap.get(a.roomId);
+        const batch = batchMap.get(a.batchId);
+        const subj = subjectMap.get(a.subjectId);
+        const fac = facultyMap.get(a.facultyId);
+
+        if (room && batch && room.capacity < batch.studentCount) {
+          violations.push({
+            id: `cap-${a.id}`,
+            type: 'ROOM_CAPACITY_EXCEEDED',
+            title: 'Room Capacity Deficit',
+            message: `Capacity Exceeded: ${room.name} (${room.capacity} cap) allocated to ${batch.name} (${batch.studentCount} students).`,
+            allocationIds: [a.id],
+            day: a.day,
+            period: a.period,
+          });
+        }
+
+        if (subj && room && subj.isLab && !room.isLab) {
+          violations.push({
+            id: `type-${a.id}`,
+            type: 'ROOM_TYPE_MISMATCH',
+            title: 'Equipment Mismatch',
+            message: `Lab Conflict: Lab course ${subj.name} assigned to non-lab classroom ${room.name}.`,
+            allocationIds: [a.id],
+            day: a.day,
+            period: a.period,
+          });
+        }
+
+        if (fac) {
+          for (let o = 0; o < (a.duration || 1); o++) {
+            const p = a.period + o;
+            if (fac.unavailableSlots.includes(`${a.day}-${p}`)) {
+              violations.push({
+                id: `unavail-${a.id}-${p}`,
+                type: 'FACULTY_UNAVAILABLE',
+                title: 'Faculty Blocked Slot',
+                message: `Unavailable: ${fac.name} is marked off on ${a.day} Period ${p}.`,
+                allocationIds: [a.id],
+                day: a.day,
+                period: p,
+              });
+            }
+          }
+        }
+      }
+
+      const byAlloc = {};
+      const bySlot = {};
+      for (const v of violations) {
+        for (const aId of v.allocationIds) {
+          if (!byAlloc[aId]) byAlloc[aId] = [];
+          byAlloc[aId].push(v);
+        }
+        const sk = `${v.day}-${v.period}`;
+        if (!bySlot[sk]) bySlot[sk] = [];
+        bySlot[sk].push(v);
+      }
+
+      return { violations, byAlloc, bySlot, hasClashes: violations.length > 0 };
+    }
+
+    // Gini index calculation
+    function computeGini(hours) {
+      if (!hours || hours.length === 0) return { gini: 0, status: 'No Data', average: 0 };
+      const sorted = [...hours].sort((a, b) => a - b);
+      const n = sorted.length;
+      const sum = sorted.reduce((a, b) => a + b, 0);
+      if (sum === 0) return { gini: 0, status: 'Equal (0h)', average: 0 };
+      let diff = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          diff += Math.abs(sorted[i] - sorted[j]);
+        }
+      }
+      const g = Math.round((diff / (2 * n * sum)) * 100) / 100;
+      const avg = Math.round((sum / n) * 10) / 10;
+      let status = 'Fair';
+      if (g <= 0.15) status = 'Excellent (Highly Equitable)';
+      else if (g <= 0.28) status = 'Good (Balanced)';
+      else if (g <= 0.4) status = 'Moderate Disparity';
+      else status = 'High Disparity';
+      return { gini: g, status, average: avg };
+    }
+
+    // --- 4. MAIN REACT APPLICATION ---
+    function App() {
+      const [batches, setBatches] = useState(() => {
+        const s = localStorage.getItem('ccw_b');
+        return s ? JSON.parse(s) : DEMO_PRESET_PAGE_3.batches;
+      });
+      const [facultyList, setFacultyList] = useState(() => {
+        const s = localStorage.getItem('ccw_f');
+        return s ? JSON.parse(s) : DEMO_PRESET_PAGE_3.faculty;
+      });
+      const [rooms, setRooms] = useState(() => {
+        const s = localStorage.getItem('ccw_r');
+        return s ? JSON.parse(s) : DEMO_PRESET_PAGE_3.rooms;
+      });
+      const [subjects, setSubjects] = useState(() => {
+        const s = localStorage.getItem('ccw_s');
+        return s ? JSON.parse(s) : DEMO_PRESET_PAGE_3.subjects;
+      });
+      const [allocations, setAllocations] = useState(() => {
+        const s = localStorage.getItem('ccw_a');
+        return s ? JSON.parse(s) : [];
+      });
+
+      const [viewMode, setViewMode] = useState('batch');
+      const [selectedBatchId, setSelectedBatchId] = useState('b_demo1');
+      const [selectedFacultyId, setSelectedFacultyId] = useState('f_sharma');
+      const [selectedRoomId, setSelectedRoomId] = useState('r_101');
+
+      const [isAuditorOpen, setIsAuditorOpen] = useState(false);
+      const [isResourcesOpen, setIsResourcesOpen] = useState(false);
+      const [isMetricsOpen, setIsMetricsOpen] = useState(false);
+      const [isSolving, setIsSolving] = useState(false);
+      const [solverStats, setSolverStats] = useState(null);
+      const [bannerMessage, setBannerMessage] = useState(null);
+
+      const [draggedId, setDraggedId] = useState(null);
+      const [dragOverKey, setDragOverKey] = useState(null);
+      const [manualSlot, setManualSlot] = useState(null);
+      const [manualSubjId, setManualSubjId] = useState('');
+      const [manualRoomId, setManualRoomId] = useState('');
+
+      const fileInputRef = useRef(null);
+
+      // Save to localStorage
+      useEffect(() => { localStorage.setItem('ccw_b', JSON.stringify(batches)); }, [batches]);
+      useEffect(() => { localStorage.setItem('ccw_f', JSON.stringify(facultyList)); }, [facultyList]);
+      useEffect(() => { localStorage.setItem('ccw_r', JSON.stringify(rooms)); }, [rooms]);
+      useEffect(() => { localStorage.setItem('ccw_s', JSON.stringify(subjects)); }, [subjects]);
+      useEffect(() => { localStorage.setItem('ccw_a', JSON.stringify(allocations)); }, [allocations]);
+
+      // Detect clashes in real-time
+      const audit = useMemo(() => {
+        return detectClashes(allocations, subjects, facultyList, rooms, batches);
+      }, [allocations, subjects, facultyList, rooms, batches]);
+
+      // Initial auto-generation if grid is empty
+      useEffect(() => {
+        if (allocations.length === 0 && subjects.length > 0) {
+          handleGenerate();
+        }
+      }, []);
+
+      const handleGenerate = () => {
+        setIsSolving(true);
+        setTimeout(() => {
+          const res = solveTimetableCSP(subjects, facultyList, rooms, batches);
+          setAllocations(res.allocations);
+          setSolverStats(res);
+          setIsSolving(false);
+          if (res.success && typeof confetti === 'function') {
+            confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+          }
+        }, 50);
+      };
+
+      const handleLoadPreset = (type) => {
+        const data = type === 'demo' ? DEMO_PRESET_PAGE_3 : FULL_PRESET;
+        setBatches(data.batches);
+        setFacultyList(data.faculty);
+        setRooms(data.rooms);
+        setSubjects(data.subjects);
+        setSelectedBatchId(data.batches[0].id);
+        setSelectedFacultyId(data.faculty[0].id);
+        setSelectedRoomId(data.rooms[0].id);
+
+        const res = solveTimetableCSP(data.subjects, data.faculty, data.rooms, data.batches);
+        setAllocations(res.allocations);
+        setSolverStats(res);
+        setBannerMessage(type === 'demo'
+          ? "Loaded ZeroClash Demo Scenario (Page 3): 6 subjects, 5 faculty, 4 rooms with 3-hour OS lab."
+          : "Loaded CS Semester Full Dataset: 3 batches, 8 subjects, 10 faculty, 6 rooms.");
+      };
+
+      // Drag and drop handler
+      const handleDrop = (day, targetPeriod) => {
+        setDragOverKey(null);
+        if (!draggedId) return;
+        const existing = allocations.find(a => a.day === day && a.period === targetPeriod && a.id !== draggedId);
+        if (existing) {
+          // Swap
+          setAllocations(prev => prev.map(a => {
+            if (a.id === draggedId) return { ...a, day, period: targetPeriod };
+            if (a.id === existing.id) {
+              const d = prev.find(x => x.id === draggedId);
+              return { ...a, day: d.day, period: d.period };
+            }
+            return a;
+          }));
+        } else {
+          // Move
+          setAllocations(prev => prev.map(a => a.id === draggedId ? { ...a, day, period: targetPeriod } : a));
+        }
+        setDraggedId(null);
+      };
+
+      const handleAddManual = (e) => {
+        e.preventDefault();
+        if (!manualSlot || !manualSubjId || !manualRoomId) return;
+        const subj = subjects.find(s => s.id === manualSubjId);
+        if (!subj) return;
+        setAllocations(prev => [...prev, {
+          id: `alloc_man_${Date.now()}`,
+          subjectId: subj.id,
+          batchId: subj.batchId,
+          facultyId: subj.facultyId,
+          roomId: manualRoomId,
+          day: manualSlot.day,
+          period: manualSlot.period,
+          duration: subj.sessionDuration || 1,
+        }]);
+        setManualSlot(null);
+        setManualSubjId('');
+        setManualRoomId('');
+      };
+
+      // Filtering allocations for viewMode
+      const filteredAllocations = allocations.filter(a => {
+        if (viewMode === 'batch') return selectedBatchId === 'all' || a.batchId === selectedBatchId;
+        if (viewMode === 'faculty') return selectedFacultyId === 'all' || a.facultyId === selectedFacultyId;
+        if (viewMode === 'room') return selectedRoomId === 'all' || a.roomId === selectedRoomId;
+        return true;
+      });
+
+      const subjectMap = new Map(subjects.map(s => [s.id, s]));
+      const facultyMap = new Map(facultyList.map(f => [f.id, f]));
+      const roomMap = new Map(rooms.map(r => [r.id, r]));
+      const batchMap = new Map(batches.map(b => [b.id, b]));
+
+      return (
+        <div className="min-h-screen flex flex-col font-sans">
+          
+          {/* TOP NAVBAR */}
+          <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm no-print">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16 gap-3">
+                
+                {/* Brand */}
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 flex items-center justify-center text-white shadow-md font-black text-sm">
+                    ⏰
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900 tracking-tight text-base">ClassClockwork</span>
+                      <span className="px-2 py-0.5 text-[9px] font-bold uppercase bg-sky-100 text-sky-800 rounded-full border border-sky-200">
+                        ZeroClash CSP
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 hidden sm:block">Automated Conflict-Free Timetable Generator</p>
+                  </div>
+                </div>
+
+                {/* View Switcher */}
+                <div className="hidden md:flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs">
+                  {['batch', 'faculty', 'room', 'master'].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => setViewMode(m)}
+                      className={`capitalize px-3 py-1 rounded-md font-medium transition-all ${viewMode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                    >
+                      {m} View
+                    </button>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsAuditorOpen(true)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                      audit.hasClashes
+                        ? 'bg-red-50 text-red-700 border-red-300 animate-pulse hover:bg-red-100'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <span>{audit.hasClashes ? '⚠️' : '✅'}</span>
+                    <span>{audit.hasClashes ? `${audit.violations.length} Clash${audit.violations.length > 1 ? 'es' : ''}` : 'Zero Clashes'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setIsResourcesOpen(true)}
+                    className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                  >
+                    Resources
+                  </button>
+
+                  <button
+                    onClick={() => setIsMetricsOpen(true)}
+                    className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                  >
+                    Metrics
+                  </button>
+
+                  {/* Presets dropdown */}
+                  <div className="relative group">
+                    <button className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200">
+                      Presets ▼
+                    </button>
+                    <div className="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-xl py-1 hidden group-hover:block z-50 text-xs">
+                      <button onClick={() => handleLoadPreset('demo')} className="w-full text-left px-3 py-2 hover:bg-sky-50 font-medium text-slate-700">
+                        🚀 ZeroClash Demo (Page 3)
+                        <div className="text-[10px] text-slate-400 font-normal">6 subjects, 5 faculty, 4 rooms, 3h OS lab</div>
+                      </button>
+                      <button onClick={() => handleLoadPreset('full')} className="w-full text-left px-3 py-2 hover:bg-sky-50 font-medium text-slate-700 border-t border-slate-100">
+                        🎓 CS Semester Full Dataset
+                        <div className="text-[10px] text-slate-400 font-normal">3 batches, 8 subjects, 10 faculty, 6 rooms</div>
+                      </button>
+                      <div className="border-t border-slate-100 my-1"></div>
+                      <button onClick={() => { if (confirm('Clear timetable?')) setAllocations([]); }} className="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50 font-medium">
+                        🗑️ Clear Timetable
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleGenerate}
+                    disabled={isSolving}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white shadow-md shadow-sky-600/20 disabled:opacity-50 transition-all flex items-center gap-1.5"
+                  >
+                    <span>{isSolving ? '⏳' : '⚡'}</span>
+                    <span>{isSolving ? 'Solving CSP...' : 'Generate Timetable'}</span>
+                  </button>
+
+                  {/* Export button */}
+                  <div className="relative group">
+                    <button className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 border border-slate-200 text-xs font-bold" title="Export">
+                      📥
+                    </button>
+                    <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-xl py-1 hidden group-hover:block z-50 text-xs">
+                      <button onClick={() => window.print()} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700">
+                        🖨️ Print / Export PDF
+                      </button>
+                      <button onClick={() => {
+                        const json = JSON.stringify({ batches, facultyList, rooms, subjects, allocations }, null, 2);
+                        const b = new Blob([json], { type: 'application/json' });
+                        const u = URL.createObjectURL(b);
+                        const a = document.createElement('a'); a.href = u; a.download = 'ZeroClash_Timetable.json'; a.click();
+                      }} className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 border-t border-slate-100">
+                        💾 Export JSON Backup
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </header>
+
+          {/* MAIN GRID & BODY */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-4 no-print">
+            
+            {/* Notification Banner */}
+            {bannerMessage && (
+              <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-800 flex items-center justify-between">
+                <span>⚡ {bannerMessage}</span>
+                <button onClick={() => setBannerMessage(null)} className="text-sky-600 font-bold px-1.5">✕</button>
+              </div>
+            )}
+
+            {/* Solver stats bar */}
+            {solverStats && (
+              <div className="bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between text-xs gap-3">
+                <div className="flex items-center gap-3">
+                  <span className={`font-bold flex items-center gap-1 ${solverStats.success ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    <span>{solverStats.success ? '✅' : '⚠️'}</span>
+                    <span>{solverStats.success ? 'Conflict-Free Timetable Generated' : 'Partial Schedule'}</span>
+                  </span>
+                  <span className="text-slate-300">|</span>
+                  <span className="font-mono text-slate-600">⏱️ {solverStats.executionTimeMs}ms</span>
+                  <span className="font-mono text-slate-400">({solverStats.iterations} nodes, {solverStats.backtracks} backtracks)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold text-[11px]">
+                    {allocations.length} sessions scheduled
+                  </span>
+                  <button onClick={() => setIsMetricsOpen(true)} className="text-sky-600 hover:underline text-xs font-semibold">
+                    View Gini Workload →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* View Filter Bar */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-500 uppercase tracking-wider text-[11px]">
+                  {viewMode === 'batch' && 'Batch Schedule:'}
+                  {viewMode === 'faculty' && 'Faculty Schedule:'}
+                  {viewMode === 'room' && 'Classroom Schedule:'}
+                  {viewMode === 'master' && 'Master Schedule:'}
+                </span>
+
+                {viewMode === 'batch' && (
+                  <select value={selectedBatchId} onChange={e => setSelectedBatchId(e.target.value)} className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg font-semibold">
+                    {batches.map(b => <option key={b.id} value={b.id}>{b.name} ({b.studentCount} students)</option>)}
+                    <option value="all">View All Batches</option>
+                  </select>
+                )}
+
+                {viewMode === 'faculty' && (
+                  <select value={selectedFacultyId} onChange={e => setSelectedFacultyId(e.target.value)} className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg font-semibold">
+                    {facultyList.map(f => <option key={f.id} value={f.id}>{f.name} (Max {f.maxHoursPerWeek}h)</option>)}
+                    <option value="all">View All Faculty</option>
+                  </select>
+                )}
+
+                {viewMode === 'room' && (
+                  <select value={selectedRoomId} onChange={e => setSelectedRoomId(e.target.value)} className="px-2.5 py-1 bg-slate-50 border border-slate-300 rounded-lg font-semibold">
+                    {rooms.map(r => <option key={r.id} value={r.id}>{r.name} (Cap {r.capacity} {r.isLab ? '• Lab' : ''})</option>)}
+                    <option value="all">View All Rooms</option>
+                  </select>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 text-slate-500 text-[11px]">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>Lecture</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>Lab Block</span>
+                <span className="flex items-center gap-1 text-red-600 font-bold"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>Live Clash</span>
+                <span className="hidden sm:inline italic text-slate-400">| Drag cards to test instant clash detection</span>
+              </div>
+            </div>
+
+            {/* 5x6 TIMETABLE MATRIX */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+              <table className="w-full border-collapse text-left min-w-[850px]">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-xs text-slate-700">
+                    <th className="p-3 w-28 text-center font-bold text-slate-500 uppercase tracking-wider border-r border-slate-200">Period / Day</th>
+                    {DAYS.map(day => (
+                      <th key={day} className="p-3 text-center font-bold uppercase tracking-wider border-r border-slate-200 last:border-r-0">
+                        <div className="text-slate-900">{day}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-xs">
+                  {PERIODS.map(pDef => (
+                    <tr key={pDef.period} className="hover:bg-slate-50/40">
+                      <td className="p-2.5 text-center border-r border-slate-200 bg-slate-50/60 font-semibold">
+                        <div className="font-bold text-slate-900">{pDef.label}</div>
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">{pDef.timeRange}</div>
+                        {pDef.isLunch && (
+                          <span className="inline-block mt-1 px-1.5 py-0.2 text-[9px] font-bold bg-emerald-100 text-emerald-800 rounded">
+                            Lunch/Flex
+                          </span>
+                        )}
+                      </td>
+
+                      {DAYS.map(day => {
+                        const slotKey = `${day}-${pDef.period}`;
+                        const isOver = dragOverKey === slotKey;
+                        const cellAllocs = filteredAllocations.filter(a => {
+                          const dur = a.duration || 1;
+                          return a.day === day && pDef.period >= a.period && pDef.period < a.period + dur;
+                        });
+                        const slotViolations = audit.bySlot[slotKey] || [];
+                        const hasClash = slotViolations.length > 0;
+
+                        return (
+                          <td
+                            key={slotKey}
+                            onDragOver={e => { e.preventDefault(); setDragOverKey(slotKey); }}
+                            onDragLeave={() => setDragOverKey(null)}
+                            onDrop={() => handleDrop(day, pDef.period)}
+                            className={`p-2 align-top border-r border-slate-200 last:border-r-0 h-28 relative transition-colors ${isOver ? 'bg-sky-50 ring-2 ring-inset ring-sky-400' : ''} ${hasClash ? 'bg-red-50/60' : ''}`}
+                          >
+                            {/* Clash Header Banner */}
+                            {hasClash && (
+                              <div className="mb-1.5 px-2 py-0.5 bg-red-600 text-white rounded text-[9.5px] font-bold flex items-center justify-between shadow-xs animate-bounce">
+                                <span>⚠️ CLASH DETECTED</span>
+                                <span>{slotViolations.length} issue(s)</span>
+                              </div>
+                            )}
+
+                            {/* Cards */}
+                            <div className="space-y-1.5 h-full">
+                              {cellAllocs.map(a => {
+                                const subj = subjectMap.get(a.subjectId);
+                                const fac = facultyMap.get(a.facultyId);
+                                const rm = roomMap.get(a.roomId);
+                                const bat = batchMap.get(a.batchId);
+                                const aViolations = audit.byAlloc[a.id] || [];
+                                const isCardConflicted = aViolations.length > 0;
+
+                                return (
+                                  <div
+                                    key={a.id}
+                                    draggable={true}
+                                    onDragStart={() => setDraggedId(a.id)}
+                                    className={`p-2.5 rounded-xl border text-xs shadow-xs transition-all cursor-grab active:cursor-grabbing relative ${
+                                      isCardConflicted
+                                        ? 'bg-red-50 border-red-400 ring-2 ring-red-400/50 shadow-md'
+                                        : subj?.isLab
+                                        ? 'bg-amber-50/90 border-amber-200 hover:border-amber-400 hover:shadow-md'
+                                        : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-1">
+                                      <span className="font-bold text-slate-900">{subj?.code || 'Course'}</span>
+                                      <div className="flex items-center gap-1">
+                                        {(a.duration || 1) > 1 && (
+                                          <span className="px-1 py-0.2 text-[8.5px] font-bold uppercase rounded bg-amber-200 text-amber-900 border border-amber-300">
+                                            {a.duration}H Lab
+                                          </span>
+                                        )}
+                                        <button
+                                          onClick={() => setAllocations(prev => prev.filter(x => x.id !== a.id))}
+                                          className="text-slate-400 hover:text-red-600 p-0.5 text-[10px]"
+                                          title="Delete"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <p className="text-[11px] font-medium text-slate-700 truncate mt-0.5">{subj?.name}</p>
+
+                                    <div className="mt-1 pt-1 border-t border-slate-100 text-[10px] text-slate-600 space-y-0.5">
+                                      <div className="font-semibold text-slate-800 truncate">👤 {fac?.name}</div>
+                                      <div className="flex justify-between text-slate-500">
+                                        <span>📍 {rm?.name}</span>
+                                        <span className="bg-slate-100 px-1 rounded font-mono text-[9px]">{bat?.name?.split(' ')[0]}</span>
+                                      </div>
+                                    </div>
+
+                                    {/* Red Conflict Badge */}
+                                    {isCardConflicted && (
+                                      <div className="mt-1.5 p-1 bg-red-100 text-red-800 rounded text-[9px] font-semibold border border-red-200">
+                                        <div className="font-bold text-red-700">⚠️ {aViolations[0]?.title}</div>
+                                        <div className="text-[8.5px] font-mono text-red-900 mt-0.5 leading-tight">{aViolations[0]?.message}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {cellAllocs.length === 0 && (
+                                <div className="h-full min-h-[60px] rounded-xl border border-dashed border-slate-200 hover:border-sky-300 flex items-center justify-center p-1 transition-all">
+                                  <button
+                                    onClick={() => setManualSlot({ day, period: pDef.period })}
+                                    className="text-slate-400 hover:text-sky-600 font-bold text-xs"
+                                    title="Add session to slot"
+                                  >
+                                    + Add
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+          </main>
+
+          {/* PRINT-ONLY VIEW */}
+          <div className="print-only p-8 bg-white text-black min-h-screen">
+            <div className="text-center border-b-2 border-black pb-3 mb-4">
+              <h1 className="text-2xl font-black uppercase">ClassClockwork Timetable</h1>
+              <p className="text-sm font-semibold">Academic Schedule - Verified Conflict-Free</p>
+            </div>
+            <table className="w-full border-collapse border border-black text-xs">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="border border-black p-2 w-24">Time</th>
+                  {DAYS.map(d => <th key={d} className="border border-black p-2">{d}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {PERIODS.map(p => (
+                  <tr key={p.period}>
+                    <td className="border border-black p-2 font-bold bg-gray-50 text-center">
+                      {p.label}<br/><span className="text-[9px] font-normal">{p.timeRange}</span>
+                    </td>
+                    {DAYS.map(d => {
+                      const list = filteredAllocations.filter(a => a.day === d && p.period >= a.period && p.period < a.period + (a.duration || 1));
+                      return (
+                        <td key={d} className="border border-black p-1.5 align-top h-16">
+                          {list.map(a => (
+                            <div key={a.id} className="text-[10px] mb-1">
+                              <strong>{subjectMap.get(a.subjectId)?.code}</strong>: {facultyMap.get(a.facultyId)?.name} ({roomMap.get(a.roomId)?.name})
+                            </div>
+                          ))}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* MODAL 1: REAL-TIME CLASH AUDITOR DRAWER */}
+          {isAuditorOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex justify-end no-print">
+              <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col p-5 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                    <span>🛡️</span> Real-Time Clash Auditor
+                  </h3>
+                  <button onClick={() => setIsAuditorOpen(false)} className="text-slate-400 hover:text-slate-800 text-lg font-bold">✕</button>
+                </div>
+                <div className="p-3 bg-slate-100 rounded-xl text-xs">
+                  {audit.hasClashes ? (
+                    <span className="text-red-700 font-bold">⚠️ {audit.violations.length} scheduling conflicts flagged</span>
+                  ) : (
+                    <span className="text-emerald-700 font-bold">✅ Zero clashes detected. All hard constraints satisfied.</span>
+                  )}
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-3 text-xs">
+                  {audit.violations.map(v => (
+                    <div key={v.id} className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                      <div className="font-bold text-red-800">{v.title}</div>
+                      <p className="font-mono text-[11px] text-red-900 mt-1">{v.message}</p>
+                      <div className="mt-2 text-[10px] text-red-600 font-semibold">{v.day} • Period {v.period}</div>
+                    </div>
+                  ))}
+                  {audit.violations.length === 0 && (
+                    <div className="text-center py-10 text-slate-400">
+                      <div>✨ Clean Schedule</div>
+                      <div className="text-[11px] mt-1">Try dragging any card onto another class to see instant conflict detection.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL 2: RESOURCE MANAGER */}
+          {isResourcesOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 no-print">
+              <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] flex flex-col p-6 space-y-4">
+                <div className="flex justify-between items-center border-b pb-3">
+                  <h3 className="font-bold text-base text-slate-900">📚 Academic Resource Manager</h3>
+                  <button onClick={() => setIsResourcesOpen(false)} className="text-slate-400 hover:text-slate-800 text-lg font-bold">✕</button>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-5 text-xs">
+                  <div>
+                    <h4 className="font-bold uppercase tracking-wider text-slate-500 mb-2">Registered Courses / Subjects ({subjects.length})</h4>
+                    <div className="space-y-1.5">
+                      {subjects.map(s => (
+                        <div key={s.id} className="p-2.5 bg-slate-50 border rounded-lg flex items-center justify-between">
+                          <div>
+                            <strong>{s.code}</strong> - {s.name} ({s.weeklySessions}x/wk, {s.sessionDuration}h block {s.isLab ? '• Lab' : ''})
+                          </div>
+                          <span className="text-slate-500">{batchMap.get(s.batchId)?.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="font-bold uppercase tracking-wider text-slate-500 mb-2">Faculty Members & Workloads ({facultyList.length})</h4>
+                    <div className="space-y-1.5">
+                      {facultyList.map(f => (
+                        <div key={f.id} className="p-2.5 bg-slate-50 border rounded-lg flex items-center justify-between">
+                          <div>
+                            <strong>{f.name}</strong> ({f.email}) • Max {f.maxHoursPerWeek} hrs/wk
+                            {f.unavailableSlots.length > 0 && <span className="text-red-600 ml-2 font-mono text-[11px] font-bold">Blocked: {f.unavailableSlots.join(', ')}</span>}
+                          </div>
+                          <span>{f.preferredMorning ? '🌅 Morning Pref' : '🌆 Afternoon Pref'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h4 className="font-bold uppercase tracking-wider text-slate-500 mb-2">Classrooms & Labs ({rooms.length})</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {rooms.map(r => (
+                        <div key={r.id} className="p-2.5 bg-slate-50 border rounded-lg">
+                          <strong>{r.name}</strong> - Cap: {r.capacity} {r.isLab ? '• Specialized Lab' : '• Lecture Hall'}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="border-t pt-3 flex justify-end">
+                  <button onClick={() => setIsResourcesOpen(false)} className="px-4 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold">
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL 3: WORKLOAD METRICS (GINI INDEX) */}
+          {isMetricsOpen && (() => {
+            const facHours = new Map();
+            for (const f of facultyList) facHours.set(f.id, 0);
+            for (const a of allocations) {
+              const cur = facHours.get(a.facultyId) || 0;
+              facHours.set(a.facultyId, cur + (a.duration || 1));
+            }
+            const giniRes = computeGini(Array.from(facHours.values()));
+            const totalRoomSlots = rooms.length * 30;
+            const occupiedRoomSlots = allocations.reduce((acc, a) => acc + (a.duration || 1), 0);
+            const util = totalRoomSlots > 0 ? Math.round((occupiedRoomSlots / totalRoomSlots) * 100) : 0;
+
+            return (
+              <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 no-print">
+                <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 space-y-4 text-xs">
+                  <div className="flex justify-between items-center border-b pb-3">
+                    <h3 className="font-bold text-base text-slate-900">📊 Workload Balance & Gini Metric</h3>
+                    <button onClick={() => setIsMetricsOpen(false)} className="text-slate-400 hover:text-slate-800 text-lg font-bold">✕</button>
+                  </div>
+                  <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-slate-900 text-sm">Faculty Workload Gini Index</span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-sky-600 text-white font-bold">G = {giniRes.gini}</span>
+                    </div>
+                    <p className="text-slate-600">
+                      Equity Rating: <strong className="text-slate-900">{giniRes.status}</strong>. Average: <strong className="text-slate-900">{giniRes.average} hrs/faculty</strong>.
+                    </p>
+                    <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                      <div className="h-full bg-sky-600 rounded-full" style={{ width: `${Math.min(100, Math.max(10, (1 - giniRes.gini) * 100))}%` }}></div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 bg-slate-50 border rounded-xl">
+                      <div className="text-slate-500 font-semibold text-[11px]">Campus Room Utilization</div>
+                      <div className="text-2xl font-black text-slate-900 mt-1">{util}%</div>
+                      <div className="text-slate-400 text-[10px]">{occupiedRoomSlots} / {totalRoomSlots} slot-hours</div>
+                    </div>
+                    <div className="p-3 bg-slate-50 border rounded-xl">
+                      <div className="text-slate-500 font-semibold text-[11px]">Total Scheduled Sessions</div>
+                      <div className="text-2xl font-black text-slate-900 mt-1">{allocations.length}</div>
+                      <div className="text-slate-400 text-[10px]">Across {batches.length} batches</div>
+                    </div>
+                  </div>
+                  <div className="border-t pt-3 flex justify-end">
+                    <button onClick={() => setIsMetricsOpen(false)} className="px-4 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold">
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* MODAL 4: INLINE ADD MANUAL SESSION */}
+          {manualSlot && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 no-print">
+              <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5 space-y-3 text-xs">
+                <h3 className="font-bold text-sm text-slate-900">
+                  Schedule Class at {manualSlot.day} • Period {manualSlot.period}
+                </h3>
+                <form onSubmit={handleAddManual} className="space-y-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Select Course</label>
+                    <select required value={manualSubjId} onChange={e => setManualSubjId(e.target.value)} className="w-full p-2 border rounded-lg">
+                      <option value="">-- Choose Subject --</option>
+                      {subjects.map(s => <option key={s.id} value={s.id}>{s.code} - {s.name} ({facultyMap.get(s.facultyId)?.name})</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Select Classroom</label>
+                    <select required value={manualRoomId} onChange={e => setManualRoomId(e.target.value)} className="w-full p-2 border rounded-lg">
+                      <option value="">-- Choose Room --</option>
+                      {rooms.map(r => <option key={r.id} value={r.id}>{r.name} (Cap {r.capacity} {r.isLab ? '• Lab' : ''})</option>)}
+                    </select>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2 border-t">
+                    <button type="button" onClick={() => setManualSlot(null)} className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                    <button type="submit" className="px-4 py-1.5 bg-sky-600 text-white font-semibold rounded-lg">Schedule</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    // Mount to DOM
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
